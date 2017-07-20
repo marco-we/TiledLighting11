@@ -49,6 +49,8 @@
 #include "ShadowRenderer.h"
 #include "RSMRenderer.h"
 
+#include "..\\..\\..\\ags_lib\\inc\\amd_ags.h"
+
 #pragma warning( disable : 4100 ) // disable unreference formal parameter warnings for /W4 builds
 
 using namespace DirectX;
@@ -122,6 +124,11 @@ static int					g_UpdateRSMs = 4;
 
 // The max distance the camera can travel
 static float                g_fMaxDistance = 500.0f;
+
+AGSContext*                 g_AGSContext = nullptr;
+AGSGPUInfo                  g_AGSGPUInfo;
+bool                        g_MbcntExtensionSupported = false;
+bool                        g_ReadfirstlaneExtensionSupported = false;
 
 //--------------------------------------------------------------------------------------
 // Constant buffers
@@ -212,6 +219,8 @@ enum
     IDC_RADIOBUTTON_FORWARD_PLUS,
     IDC_RADIOBUTTON_TILED_DEFERRED,
     IDC_CHECKBOX_ENABLE_LIGHT_DRAWING,
+    IDC_CHECKBOX_USE_MBCNT,
+    IDC_CHECKBOX_USE_READFIRSTLANE,
     IDC_SLIDER_NUM_POINT_LIGHTS,
     IDC_SLIDER_NUM_SPOT_LIGHTS,
     IDC_CHECKBOX_ENABLE_TRANSPARENT_OBJECTS,
@@ -276,6 +285,9 @@ int WINAPI wWinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdL
     _CrtSetDbgFlag( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
 #endif
 
+    // Initialise AGS lib
+    agsInit(&g_AGSContext, nullptr, &g_AGSGPUInfo);
+    
     // Set DXUT callbacks
     DXUTSetCallbackMsgProc( MsgProc );
     DXUTSetCallbackKeyboard( OnKeyboard );
@@ -301,6 +313,9 @@ int WINAPI wWinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdL
 
     // Ensure the ShaderCache aborts if in a lengthy generation process
     g_ShaderCache.Abort();
+
+    // Clean up AGS lib
+    agsDeInit(g_AGSContext);
 
     return DXUTGetExitCode();
 }
@@ -384,6 +399,11 @@ void InitApp()
     g_NumGridObjectsSlider = new AMD::Slider( g_HUD.m_GUI, IDC_SLIDER_NUM_GRID_OBJECTS, iY, L"Active Grid Objects", 0, MAX_NUM_GRID_OBJECTS, g_iNumActiveGridObjects );
     g_NumGBufferRTsSlider = new AMD::Slider( g_HUD.m_GUI, IDC_SLIDER_NUM_GBUFFER_RTS, iY, L"Active G-Buffer RTs", 2, MAX_NUM_GBUFFER_RENDER_TARGETS, g_iNumActiveGBufferRTs );
     g_NumGBufferRTsSlider->SetEnabled(false);
+
+    iY += AMD::HUD::iGroupDelta;
+
+    g_HUD.m_GUI.AddCheckBox(IDC_CHECKBOX_USE_MBCNT, L"Use mbcnt", AMD::HUD::iElementOffset, iY, AMD::HUD::iElementWidth, AMD::HUD::iElementHeight, false);
+    g_HUD.m_GUI.AddCheckBox(IDC_CHECKBOX_USE_READFIRSTLANE, L"Use readfirstlane", AMD::HUD::iElementOffset, iY += AMD::HUD::iElementDelta, AMD::HUD::iElementWidth, AMD::HUD::iElementHeight, false);
 
     // Initialize the static data in CommonUtil
     g_CommonUtil.InitStaticData();
@@ -504,6 +524,39 @@ void RenderText()
     }
 }
 
+//--------------------------------------------------------------------------------------
+// Initialize required AGS extensions
+//--------------------------------------------------------------------------------------
+void InitExtensions()
+{
+    // Avoid trying to initialize the shader extensions if we are not a GCN GPU
+    if (g_AGSGPUInfo.numDevices > 0 && g_AGSGPUInfo.devices[0].architectureVersion == AGSDeviceInfo::ArchitectureVersion_GCN)
+    {
+        unsigned int extensionsSupported = 0;
+        if (agsDriverExtensionsDX11_Init(g_AGSContext, DXUTGetD3D11Device(), 7, &extensionsSupported) == AGS_SUCCESS)
+        {
+            if (extensionsSupported & AGS_DX11_EXTENSION_INTRINSIC_READFIRSTLANE)
+            {
+                // the readfirstlane extension is supported so use this codepath
+                g_ReadfirstlaneExtensionSupported = true;
+            }
+            
+            if (extensionsSupported & AGS_DX11_EXTENSION_INTRINSIC_MBCOUNT)
+            {
+                // the mbnct extension is supported so use this codepath
+                g_MbcntExtensionSupported = true;
+            }            
+        }
+    }
+    else
+    {
+        g_ReadfirstlaneExtensionSupported = false;
+        g_MbcntExtensionSupported = false;
+    }
+
+    g_HUD.m_GUI.GetCheckBox(IDC_CHECKBOX_USE_READFIRSTLANE)->SetVisible(g_ReadfirstlaneExtensionSupported);
+    g_HUD.m_GUI.GetCheckBox(IDC_CHECKBOX_USE_MBCNT)->SetVisible(g_MbcntExtensionSupported);
+}
 
 //--------------------------------------------------------------------------------------
 // Reject any D3D11 devices that aren't acceptable by returning false
@@ -522,6 +575,9 @@ HRESULT CALLBACK OnD3D11CreateDevice( ID3D11Device* pd3dDevice, const DXGI_SURFA
                                      void* pUserContext )
 {
     HRESULT hr;
+
+    // It is important that the extension mechanism is initialized before we create the shaders.
+    InitExtensions();
 
     XMVECTOR SceneMin, SceneMax;
 
@@ -703,6 +759,12 @@ void CALLBACK OnD3D11FrameRender( ID3D11Device* pd3dDevice, ID3D11DeviceContext*
     {
         g_CurrentGuiState.m_nDebugDrawType = bDebugDrawMethodOne ? DEBUG_DRAW_RADAR_COLORS : DEBUG_DRAW_GRAYSCALE;
     }
+
+    // Check GUI state for Mbcnt enabled TODO check for extension
+    g_CurrentGuiState.m_bUseMbcntEnabled = g_HUD.m_GUI.GetCheckBox(IDC_CHECKBOX_USE_MBCNT)->GetEnabled() && g_MbcntExtensionSupported;
+
+    // Check GUI state for Readfirstlane enabled TODO check for extension
+    g_CurrentGuiState.m_bUseReadFirstlaneEnabled = g_HUD.m_GUI.GetCheckBox(IDC_CHECKBOX_USE_READFIRSTLANE)->GetEnabled() && g_ReadfirstlaneExtensionSupported;
 
     // Check GUI state for light drawing enabled
     g_CurrentGuiState.m_bLightDrawingEnabled = g_HUD.m_GUI.GetCheckBox( IDC_CHECKBOX_ENABLE_LIGHT_DRAWING )->GetEnabled() &&
@@ -969,6 +1031,9 @@ void CALLBACK OnD3D11DestroyDevice( void* pUserContext )
     g_ShaderCache.OnDestroyDevice();
     g_HUD.OnDestroyDevice();
     TIMER_Destroy();
+
+    // It is safe to call the deinit even if the init was not called.
+    agsDriverExtensionsDX11_DeInit(g_AGSContext);
 }
 
 

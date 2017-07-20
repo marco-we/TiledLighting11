@@ -92,6 +92,8 @@ namespace TiledLighting11
         unsigned m_uNumSpotLights;
         int m_nLightingMode;
         int m_nDebugDrawType;
+        bool m_bUseMbcntEnabled;
+        bool m_bUseReadFirstlaneEnabled;
         bool m_bLightDrawingEnabled;
         bool m_bTransparentObjectsEnabled;
         bool m_bShadowsEnabled;
