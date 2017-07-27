@@ -822,17 +822,17 @@ bool ShaderCache::AddShader( ID3D11DeviceChild** ppShader,
 #ifdef _DEBUG
     // Best flags for shader debugging
     // /Zi - Enable debugging information
-    // /Od - Disable optimizations
+    // /Od - Disable optimizations -- incompatible with GCN shader extensions
     // /Gfp - Prefer flow control constructs
-    wcscpy_s( wsCompilationFlags, m_uFILENAME_MAX_LENGTH, L" /Zi /Od /Gfp" );
+    wcscpy_s(wsCompilationFlags, m_uFILENAME_MAX_LENGTH, L" /Zi /Gfp ");
 #else
     if (m_bForceDebugShaders)
     {
         // Best flags for shader debugging
         // /Zi - Enable debugging information
-        // /Od - Disable optimizations
+        // /Od - Disable optimizations -- incompatible with GCN shader extensions
         // /Gfp - Prefer flow control constructs
-        wcscpy_s( wsCompilationFlags, m_uFILENAME_MAX_LENGTH, L" /Od" );
+        wcscpy_s( wsCompilationFlags, m_uFILENAME_MAX_LENGTH, L" /Zi /Gfp" );
     }
     else
     {
