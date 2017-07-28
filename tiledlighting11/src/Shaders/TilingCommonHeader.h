@@ -27,6 +27,8 @@
 //--------------------------------------------------------------------------------------
 
 
+#include "../../../ags_lib/hlsl/ags_shader_intrinsics_dx11.hlsl"
+
 #define FLT_MAX         3.402823466e+38F
 
 //-----------------------------------------------------------------------------------------
@@ -245,6 +247,9 @@ bool CalculateMinMaxDepthInLdsMSAA( uint3 globalIdx, uint depthBufferNumSamples)
 }
 #endif
 
+#define ENABLE_READFIRSTLANE_USE 0
+#define ENABLE_BALLOT_USE        1
+
 #if ( NUM_MSAA_SAMPLES <= 1 ) || ( FORWARD_PLUS == 1 )  // non-MSAA, or Forward+ MSAA
 void
 #else                                                   // Tiled Deferred MSAA (return depth-based edge detection result)
@@ -290,10 +295,20 @@ DoLightCulling( in uint3 globalIdx, in uint localIdxFlattened, in uint3 groupIdx
         // with the positive half-space outside the frustum (and remember, 
         // view space is left handed, so use the left-hand rule to determine 
         // cross product direction)
-        for(uint i=0; i<4; i++)
+        for (uint i = 0; i < 4; i++)
+        {
+#if ENABLE_READFIRSTLANE_USE
+            float4 tempFrustum = CreatePlaneEquation(frustum[i], frustum[(i + 1) & 3]);
+            frustumEqn[i].x = AmdDxExtShaderIntrinsics_ReadfirstlaneF(tempFrustum.x);
+            frustumEqn[i].y = AmdDxExtShaderIntrinsics_ReadfirstlaneF(tempFrustum.y);
+            frustumEqn[i].z = AmdDxExtShaderIntrinsics_ReadfirstlaneF(tempFrustum.z);
+            frustumEqn[i].w = AmdDxExtShaderIntrinsics_ReadfirstlaneF(tempFrustum.w);
+#else
             frustumEqn[i] = CreatePlaneEquation( frustum[i], frustum[(i+1)&3] );
+#endif
+        }
     }
-
+    
     GroupMemoryBarrierWithGroupSync();
 
     // calculate the min and max depth for this tile, 
@@ -313,16 +328,67 @@ DoLightCulling( in uint3 globalIdx, in uint localIdxFlattened, in uint3 groupIdx
 #endif
 
     GroupMemoryBarrierWithGroupSync();
+#if ENABLE_READFIRSTLANE_USE && false
+    float maxZ = AmdDxExtShaderIntrinsics_ReadfirstlaneF(asfloat(ldsZMax));
+    float minZ = AmdDxExtShaderIntrinsics_ReadfirstlaneF(asfloat(ldsZMin));
+    fHalfZ = AmdDxExtShaderIntrinsics_ReadfirstlaneF((minZ + maxZ) / 2.0f);
+#else  
     float maxZ = asfloat( ldsZMax );
     float minZ = asfloat( ldsZMin );
     fHalfZ = (minZ + maxZ) / 2.0f;
-
+#endif    
     // loop over the lights and do a sphere vs. frustum intersection test
     for(uint i=localIdxFlattened; i<g_uNumLights; i+=NUM_THREADS_PER_TILE)
     {
         float4 center = g_PointLightBufferCenterAndRadius[i];
         float r = center.w;
         center.xyz = mul( float4(center.xyz, 1), g_mView ).xyz;
+
+#if ENABLE_BALLOT_USE
+        
+        if ( ( GetSignedDistanceFromPlane( center, frustumEqn[0] ) < r) &&
+             ( GetSignedDistanceFromPlane( center, frustumEqn[1] ) < r) &&
+             ( GetSignedDistanceFromPlane( center, frustumEqn[2] ) < r) &&
+             ( GetSignedDistanceFromPlane( center, frustumEqn[3] ) < r) )
+        {
+            {
+                bool withinRange = -center.z + minZ < r && center.z - fHalfZ < r;
+                uint2 ballot = AmdDxExtShaderIntrinsics_Ballot( withinRange );
+                if ( any( ballot ) )
+                {
+                    uint sharedIdx = 0;
+                    if ( AmdDxExtShaderIntrinsics_LaneId() == 0 )
+                    {
+                        uint cnt = countbits( ballot.x ) + countbits( ballot.y );
+                        InterlockedAdd( ldsLightIdxCounterA, cnt, sharedIdx );
+                    }
+                    sharedIdx = AmdDxExtShaderIntrinsics_ReadlaneU( sharedIdx, 0 );
+
+                    if ( withinRange )
+                        ldsLightIdx[sharedIdx + AmdDxExtShaderIntrinsics_MBCnt( ballot )] = i;
+                }
+            }
+
+            {
+                bool withinRange = -center.z + fHalfZ < r && center.z - maxZ < r;
+                uint2 ballot = AmdDxExtShaderIntrinsics_Ballot( withinRange );
+                if ( any( ballot ) )
+                {
+                    uint sharedIdx = 0;
+                    if (AmdDxExtShaderIntrinsics_LaneId() == 0)
+                    {
+                        uint cnt = countbits( ballot.x ) + countbits( ballot.y );
+                        InterlockedAdd( ldsLightIdxCounterB, cnt, sharedIdx );
+                    }
+                    sharedIdx = AmdDxExtShaderIntrinsics_ReadlaneU( sharedIdx, 0 );
+
+                    if ( withinRange )
+                        ldsLightIdx[sharedIdx + AmdDxExtShaderIntrinsics_MBCnt( ballot )] = i;
+                }
+            }
+        }
+        
+#else   // !USE_BALLOT
 
         // test if sphere is intersecting or inside frustum
         if( ( GetSignedDistanceFromPlane( center, frustumEqn[0] ) < r ) &&
@@ -347,14 +413,62 @@ DoLightCulling( in uint3 globalIdx, in uint localIdxFlattened, in uint3 groupIdx
                 ldsLightIdx[dstIdx] = i;
             }
         }
+#endif
     }
-
+  
     // loop over the spot lights and do a sphere vs. frustum intersection test
     for(uint j=localIdxFlattened; j<g_uNumSpotLights; j+=NUM_THREADS_PER_TILE)
     {
         float4 center = g_SpotLightBufferCenterAndRadius[j];
         float r = center.w;
-        center.xyz = mul( float4(center.xyz, 1), g_mView ).xyz;
+        center.xyz = mul( float4( center.xyz, 1 ), g_mView ).xyz;
+
+#if ENABLE_BALLOT_USE
+
+
+        if ( ( GetSignedDistanceFromPlane( center, frustumEqn[0] ) < r) &&
+             ( GetSignedDistanceFromPlane( center, frustumEqn[1] ) < r) &&
+             ( GetSignedDistanceFromPlane( center, frustumEqn[2] ) < r) &&
+             ( GetSignedDistanceFromPlane( center, frustumEqn[3] ) < r) )
+        {
+            {
+                bool withinRange = -center.z + minZ < r && center.z - fHalfZ < r;
+                uint2 ballot = AmdDxExtShaderIntrinsics_Ballot( withinRange );
+                if ( any( ballot ) )
+                {
+                    uint sharedIdx = 0;
+                    if ( AmdDxExtShaderIntrinsics_LaneId() == 0 )
+                    {
+                        uint cnt = countbits( ballot.x ) + countbits( ballot.y );
+                        InterlockedAdd( ldsSpotIdxCounterA, cnt, sharedIdx );
+                    }
+                    sharedIdx = AmdDxExtShaderIntrinsics_ReadlaneU( sharedIdx, 0 );
+
+                    if ( withinRange )
+                        ldsSpotIdx[sharedIdx + AmdDxExtShaderIntrinsics_MBCnt( ballot )] = i;
+                }
+            }
+
+            {
+                bool withinRange = -center.z + fHalfZ < r && center.z - maxZ < r;
+                uint2 ballot = AmdDxExtShaderIntrinsics_Ballot( withinRange );
+                if ( any( ballot ) )
+                {
+                    uint sharedIdx = 0;
+                    if ( AmdDxExtShaderIntrinsics_LaneId() == 0 )
+                    {
+                        uint cnt = countbits( ballot.x ) + countbits( ballot.y );
+                        InterlockedAdd( ldsSpotIdxCounterB, cnt, sharedIdx );
+                    }
+                    sharedIdx = AmdDxExtShaderIntrinsics_ReadlaneU( sharedIdx, 0 );
+
+                    if ( withinRange )
+                        ldsSpotIdx[sharedIdx + AmdDxExtShaderIntrinsics_MBCnt( ballot )] = i;
+                }
+            }
+        }
+
+#else   // !USE_BALLOT        
 
         // test if sphere is intersecting or inside frustum
         if( ( GetSignedDistanceFromPlane( center, frustumEqn[0] ) < r ) &&
@@ -379,6 +493,7 @@ DoLightCulling( in uint3 globalIdx, in uint localIdxFlattened, in uint3 groupIdx
                 ldsSpotIdx[dstIdx] = j;
             }
         }
+#endif
     }
 
 // Only process VPLs for opaque geometry. The effect is barely 
