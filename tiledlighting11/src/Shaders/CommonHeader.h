@@ -26,6 +26,16 @@
 // HLSL file for the TiledLighting11 sample. Common header file for all shaders.
 //--------------------------------------------------------------------------------------
 
+#if GCN_SHADER_EXTENSIONS
+#include "../../../ags_lib/hlsl/ags_shader_intrinsics_dx11.hlsl"
+#define USE_READFIRSTLANE        0
+#define USE_BALLOT               1
+#define USE_SWIZZLE              0
+#else
+#define USE_READFIRSTLANE        0
+#define USE_BALLOT               0
+#define USE_SWIZZLE              0
+#endif
 
 //--------------------------------------------------------------------------------------
 // Miscellaneous constants

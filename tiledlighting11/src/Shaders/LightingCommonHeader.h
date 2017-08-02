@@ -26,6 +26,11 @@
 // HLSL file for the TiledLighting11 sample. Header file for lighting.
 //--------------------------------------------------------------------------------------
 
+#if USE_READFIRSTLANE
+#define LCH_LIGHT_READFIRSTLANE 0
+#define LCH_SPOT_READFIRSTLANE  0
+#define LCH_VPL_READFIRSTLANE   0
+#endif
 
 //-----------------------------------------------------------------------------------------
 // Textures and Buffers
@@ -146,10 +151,17 @@ float DoSpotShadow( uint nShadowIndex, in float3 vPosition )
 
 void DoLighting(uniform bool bDoShadow, in Buffer<float4> PointLightBufferCenterAndRadius, in Buffer<float4> PointLightBufferColor, in uint nLightIndex, in float3 vPosition, in float3 vNorm, in float3 vViewDir, out float3 LightColorDiffuseResult, out float3 LightColorSpecularResult)
 {
+#if LCH_LIGHT_READFIRSTLANE
     float4 CenterAndRadius = PointLightBufferCenterAndRadius[nLightIndex];
+    CenterAndRadius.x = AmdDxExtShaderIntrinsics_ReadfirstlaneF( CenterAndRadius.x );
+    CenterAndRadius.y = AmdDxExtShaderIntrinsics_ReadfirstlaneF( CenterAndRadius.y );
+    CenterAndRadius.z = AmdDxExtShaderIntrinsics_ReadfirstlaneF( CenterAndRadius.z );
+    CenterAndRadius.w = AmdDxExtShaderIntrinsics_ReadfirstlaneF( CenterAndRadius.w );
+#else    
+    float4 CenterAndRadius = PointLightBufferCenterAndRadius[nLightIndex];
+#endif
 
     float3 vToLight = CenterAndRadius.xyz - vPosition;
-    float3 vLightDir = normalize(vToLight);
     float fLightDistance = length(vToLight);
 
     LightColorDiffuseResult = float3(0,0,0);
@@ -158,6 +170,7 @@ void DoLighting(uniform bool bDoShadow, in Buffer<float4> PointLightBufferCenter
     float fRad = CenterAndRadius.w;
     if( fLightDistance < fRad )
     {
+        float3 vLightDir = vToLight / fLightDistance;
         float x = fLightDistance / fRad;
         // fake inverse squared falloff:
         // -(1/k)*(1-(k+1)/(1+k*x^2))
@@ -179,14 +192,31 @@ void DoLighting(uniform bool bDoShadow, in Buffer<float4> PointLightBufferCenter
 
 void DoSpotLighting(uniform bool bDoShadow, in Buffer<float4> SpotLightBufferCenterAndRadius, in Buffer<float4> SpotLightBufferColor, in Buffer<float4> SpotLightBufferSpotParams, in uint nLightIndex, in float3 vPosition, in float3 vNorm, in float3 vViewDir, out float3 LightColorDiffuseResult, out float3 LightColorSpecularResult)
 {
+#if LCH_SPOT_READFIRSTLANE
+    float4 BoundingSphereCenterAndRadius;
+    float4 SpotParams;
+    BoundingSphereCenterAndRadius.x = AmdDxExtShaderIntrinsics_ReadfirstlaneF( SpotLightBufferCenterAndRadius[nLightIndex].x );
+    BoundingSphereCenterAndRadius.y = AmdDxExtShaderIntrinsics_ReadfirstlaneF( SpotLightBufferCenterAndRadius[nLightIndex].y );
+    BoundingSphereCenterAndRadius.z = AmdDxExtShaderIntrinsics_ReadfirstlaneF( SpotLightBufferCenterAndRadius[nLightIndex].z );
+    BoundingSphereCenterAndRadius.w = AmdDxExtShaderIntrinsics_ReadfirstlaneF( SpotLightBufferCenterAndRadius[nLightIndex].w );
+    SpotParams.x = AmdDxExtShaderIntrinsics_ReadfirstlaneF( SpotLightBufferSpotParams[nLightIndex].x );
+    SpotParams.y = AmdDxExtShaderIntrinsics_ReadfirstlaneF( SpotLightBufferSpotParams[nLightIndex].y );
+    SpotParams.z = AmdDxExtShaderIntrinsics_ReadfirstlaneF( SpotLightBufferSpotParams[nLightIndex].z );
+    SpotParams.w = AmdDxExtShaderIntrinsics_ReadfirstlaneF( SpotLightBufferSpotParams[nLightIndex].w );
+#else    
     float4 BoundingSphereCenterAndRadius = SpotLightBufferCenterAndRadius[nLightIndex];
     float4 SpotParams = SpotLightBufferSpotParams[nLightIndex];
-
+#endif
     // reconstruct z component of the light dir from x and y
     float3 SpotLightDir;
+#if LCH_SPOT_READFIRSTLANE
+    SpotLightDir.x = AmdDxExtShaderIntrinsics_ReadfirstlaneF( SpotParams.x );
+    SpotLightDir.y = AmdDxExtShaderIntrinsics_ReadfirstlaneF( SpotParams.y );
+    SpotLightDir.z = AmdDxExtShaderIntrinsics_ReadfirstlaneF( sqrt(1 - SpotLightDir.x*SpotLightDir.x - SpotLightDir.y*SpotLightDir.y) );    
+#else        
     SpotLightDir.xy = SpotParams.xy;
     SpotLightDir.z = sqrt(1 - SpotLightDir.x*SpotLightDir.x - SpotLightDir.y*SpotLightDir.y);
-
+#endif
     // the sign bit for cone angle is used to store the sign for the z component of the light dir
     SpotLightDir.z = (SpotParams.z > 0) ? SpotLightDir.z : -SpotLightDir.z;
 
@@ -230,7 +260,15 @@ void DoSpotLighting(uniform bool bDoShadow, in Buffer<float4> SpotLightBufferCen
 
 void DoVPLLighting(in StructuredBuffer<float4> VPLBufferCenterAndRadius, in StructuredBuffer<VPLData> VPLBufferData, in uint nLightIndex, in float3 vPosition, in float3 vNorm, out float3 LightColorDiffuseResult)
 {
+#if LCH_VPL_READFIRSTLANE
+    float4 CenterAndRadius;
+    CenterAndRadius.x = AmdDxExtShaderIntrinsics_ReadfirstlaneF( VPLBufferCenterAndRadius[nLightIndex].x );
+    CenterAndRadius.y = AmdDxExtShaderIntrinsics_ReadfirstlaneF( VPLBufferCenterAndRadius[nLightIndex].y );
+    CenterAndRadius.z = AmdDxExtShaderIntrinsics_ReadfirstlaneF( VPLBufferCenterAndRadius[nLightIndex].z );
+    CenterAndRadius.w = AmdDxExtShaderIntrinsics_ReadfirstlaneF( VPLBufferCenterAndRadius[nLightIndex].w );
+#else    
     float4 CenterAndRadius = VPLBufferCenterAndRadius[nLightIndex];
+#endif
     VPLData Data = VPLBufferData[nLightIndex];
 
     float3 vToLight = CenterAndRadius.xyz - vPosition;
