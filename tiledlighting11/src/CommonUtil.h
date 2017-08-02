@@ -92,8 +92,7 @@ namespace TiledLighting11
         unsigned m_uNumSpotLights;
         int m_nLightingMode;
         int m_nDebugDrawType;
-        bool m_bUseMbcntEnabled;
-        bool m_bUseReadFirstlaneEnabled;
+        bool m_bUseShaderExtensions;
         bool m_bLightDrawingEnabled;
         bool m_bTransparentObjectsEnabled;
         bool m_bShadowsEnabled;
@@ -169,7 +168,7 @@ namespace TiledLighting11
         ID3D11VertexShader * GetFullScreenVS() const { return m_pFullScreenVS; }
         ID3D11PixelShader * GetFullScreenPS( unsigned uMSAASampleCount ) const;
 
-        ID3D11ComputeShader * GetLightCullCSForBlendedObjects( unsigned uMSAASampleCount ) const;
+        ID3D11ComputeShader * GetLightCullCSForBlendedObjects( unsigned uMSAASampleCount, bool bGCNShaderExtensions ) const;
 
         ID3D11DepthStencilState * GetDepthStencilState( int nDepthStencilStateType ) const { return m_pDepthStencilState[nDepthStencilStateType]; }
         ID3D11RasterizerState * GetRasterizerState( int nRasterizerStateType ) const { return m_pRasterizerState[nRasterizerStateType]; }
@@ -242,9 +241,9 @@ namespace TiledLighting11
         ID3D11InputLayout*          m_pSceneBlendedLayout;
         ID3D11InputLayout*          m_pSceneBlendedDepthLayout;
 
-        // compute shaders for tiled culling
-        static const int NUM_LIGHT_CULLING_COMPUTE_SHADERS_FOR_BLENDED_OBJECTS = NUM_MSAA_SETTINGS;  // one for each MSAA setting
-        ID3D11ComputeShader*        m_pLightCullCSForBlendedObjects[NUM_LIGHT_CULLING_COMPUTE_SHADERS_FOR_BLENDED_OBJECTS];
+        // compute shaders for tiled culling (MSAA mode, GCN shader extensions enabled/disabled)
+        static const int NUM_LIGHT_CULLING_COMPUTE_SHADERS_FOR_BLENDED_OBJECTS = NUM_MSAA_SETTINGS*2;
+        ID3D11ComputeShader*        m_pLightCullCSForBlendedObjects[NUM_LIGHT_CULLING_COMPUTE_SHADERS_FOR_BLENDED_OBJECTS][2];
 
         // debug draw shaders for the lights-per-tile visualization modes
         ID3D11PixelShader*          m_pDebugDrawNumLightsPerTileRadarColorsPS;

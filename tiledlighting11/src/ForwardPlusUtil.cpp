@@ -59,14 +59,16 @@ namespace TiledLighting11
         ,m_pBlendStateAlphaToCoverageDepthOnly(NULL)
         ,m_pBlendStateAlpha(NULL)
     {
+        ID3D11PixelShader** pSceneForwardPS = &m_pSceneForwardPS[0][0][0][0];
         for( int i = 0; i < NUM_FORWARD_PIXEL_SHADERS; i++ )
         {
-            m_pSceneForwardPS[i] = NULL;
+            pSceneForwardPS[i] = NULL;
         }
 
+        ID3D11ComputeShader** pLightCullCS = &m_pLightCullCS[0][0][0];
         for( int i = 0; i < NUM_LIGHT_CULLING_COMPUTE_SHADERS; i++ )
         {
-            m_pLightCullCS[i] = NULL;
+            pLightCullCS[i] = NULL;
         }
     }
 
@@ -84,14 +86,16 @@ namespace TiledLighting11
         SAFE_RELEASE(m_pLayoutPositionAndTex11);
         SAFE_RELEASE(m_pLayoutForward11);
 
+        ID3D11PixelShader** pSceneForwardPS = &m_pSceneForwardPS[0][0][0][0];
         for( int i = 0; i < NUM_FORWARD_PIXEL_SHADERS; i++ )
         {
-            SAFE_RELEASE(m_pSceneForwardPS[i]);
+            SAFE_RELEASE(pSceneForwardPS[i]);
         }
 
+        ID3D11ComputeShader** pLightCullCS = &m_pLightCullCS[0][0][0];
         for( int i = 0; i < NUM_LIGHT_CULLING_COMPUTE_SHADERS; i++ )
         {
-            SAFE_RELEASE(m_pLightCullCS[i]);
+            SAFE_RELEASE( pLightCullCS[i]);
         }
 
         SAFE_RELEASE(m_pBlendStateOpaque);
@@ -151,14 +155,16 @@ namespace TiledLighting11
         SAFE_RELEASE(m_pLayoutPositionAndTex11);
         SAFE_RELEASE(m_pLayoutForward11);
 
+        ID3D11PixelShader** pSceneForwardPS = &m_pSceneForwardPS[0][0][0][0];
         for( int i = 0; i < NUM_FORWARD_PIXEL_SHADERS; i++ )
         {
-            SAFE_RELEASE(m_pSceneForwardPS[i]);
+            SAFE_RELEASE(pSceneForwardPS[i]);
         }
 
+        ID3D11ComputeShader** pLightCullCS = &m_pLightCullCS[0][0][0];
         for( int i = 0; i < NUM_LIGHT_CULLING_COMPUTE_SHADERS; i++ )
         {
-            SAFE_RELEASE(m_pLightCullCS[i]);
+            SAFE_RELEASE(pLightCullCS[i]);
         }
 
         SAFE_RELEASE(m_pBlendStateOpaque);
@@ -206,10 +212,11 @@ namespace TiledLighting11
         bool bMSAAEnabled = ( CurrentGuiState.m_uMSAASampleCount > 1 );
         bool bShadowsEnabled = ( CurrentGuiState.m_nLightingMode == LIGHTING_SHADOWS ) && CurrentGuiState.m_bShadowsEnabled;
         bool bVPLsEnabled = ( CurrentGuiState.m_nLightingMode == LIGHTING_SHADOWS ) && CurrentGuiState.m_bVPLsEnabled;
+        bool bGCNShaderExtensionsEnabled = CurrentGuiState.m_bUseShaderExtensions;
 
         // Default pixel shader
-        ID3D11PixelShader* pScenePS = GetScenePS(false, bShadowsEnabled, bVPLsEnabled);
-        ID3D11PixelShader* pScenePSAlphaTest = GetScenePS(true, bShadowsEnabled, bVPLsEnabled);
+        ID3D11PixelShader* pScenePS = GetScenePS(false, bShadowsEnabled, bVPLsEnabled, bGCNShaderExtensionsEnabled);
+        ID3D11PixelShader* pScenePSAlphaTest = GetScenePS(true, bShadowsEnabled, bVPLsEnabled, bGCNShaderExtensionsEnabled);
 
         // See if we need to use one of the debug drawing shaders instead
         bool bDebugDrawingEnabled = ( CurrentGuiState.m_nDebugDrawType == DEBUG_DRAW_RADAR_COLORS ) || ( CurrentGuiState.m_nDebugDrawType == DEBUG_DRAW_GRAYSCALE );
@@ -220,11 +227,11 @@ namespace TiledLighting11
         }
 
         // Light culling compute shader
-        ID3D11ComputeShader* pLightCullCS = GetLightCullCS(CurrentGuiState.m_uMSAASampleCount, bVPLsEnabled);
+        ID3D11ComputeShader* pLightCullCS = GetLightCullCS(CurrentGuiState.m_uMSAASampleCount, bVPLsEnabled, bGCNShaderExtensionsEnabled);
         ID3D11ShaderResourceView* pDepthSRV = DepthStencilBufferForOpaque.m_pDepthStencilSRV;
 
         // Light culling compute shader for transparent objects
-        ID3D11ComputeShader* pLightCullCSForTransparency = CommonUtil.GetLightCullCSForBlendedObjects(CurrentGuiState.m_uMSAASampleCount);
+        ID3D11ComputeShader* pLightCullCSForTransparency = CommonUtil.GetLightCullCSForBlendedObjects(CurrentGuiState.m_uMSAASampleCount, bGCNShaderExtensionsEnabled);
         ID3D11ShaderResourceView* pDepthSRVForTransparency = DepthStencilBufferForTransparency.m_pDepthStencilSRV;
 
         // Switch off alpha blending
@@ -446,20 +453,23 @@ namespace TiledLighting11
         SAFE_RELEASE(m_pLayoutPositionAndTex11);
         SAFE_RELEASE(m_pLayoutForward11);
 
+        ID3D11PixelShader** pSceneForwardPS = &m_pSceneForwardPS[0][0][0][0];
         for( int i = 0; i < NUM_FORWARD_PIXEL_SHADERS; i++ )
         {
-            SAFE_RELEASE(m_pSceneForwardPS[i]);
+            SAFE_RELEASE(pSceneForwardPS[i]);
         }
 
+        ID3D11ComputeShader** pLightCullCS = &m_pLightCullCS[0][0][0];
         for( int i = 0; i < NUM_LIGHT_CULLING_COMPUTE_SHADERS; i++ )
         {
-            SAFE_RELEASE(m_pLightCullCS[i]);
+            SAFE_RELEASE(pLightCullCS[i]);
         }
 
-        AMD::ShaderCache::Macro ShaderMacroSceneForwardPS[3];
+        AMD::ShaderCache::Macro ShaderMacroSceneForwardPS[4];
         wcscpy_s( ShaderMacroSceneForwardPS[0].m_wsName, AMD::ShaderCache::m_uMACRO_MAX_LENGTH, L"USE_ALPHA_TEST" );
         wcscpy_s( ShaderMacroSceneForwardPS[1].m_wsName, AMD::ShaderCache::m_uMACRO_MAX_LENGTH, L"SHADOWS_ENABLED" );
         wcscpy_s( ShaderMacroSceneForwardPS[2].m_wsName, AMD::ShaderCache::m_uMACRO_MAX_LENGTH, L"VPLS_ENABLED" );
+        wcscpy_s( ShaderMacroSceneForwardPS[3].m_wsName, AMD::ShaderCache::m_uMACRO_MAX_LENGTH, L"GCN_SHADER_EXTENSIONS" );
 
         const D3D11_INPUT_ELEMENT_DESC Layout[] =
         {
@@ -496,18 +506,25 @@ namespace TiledLighting11
                     // VPLS_ENABLED 0 first time through (false), then 1 (true)
                     ShaderMacroSceneForwardPS[2].m_iValue = k;
 
-                    pShaderCache->AddShader( (ID3D11DeviceChild**)&m_pSceneForwardPS[2*2*i + 2*j + k], AMD::ShaderCache::SHADER_TYPE_PIXEL, L"ps_5_0", L"RenderSceneForwardPS",
-                        L"Forward.hlsl", 3, ShaderMacroSceneForwardPS, NULL, NULL, 0 );
+                    for ( int m = 0; m < 2; m++ )
+                    {
+                        // GCN shader extensions 0 first time through (false), then 1 (true)
+                        ShaderMacroSceneForwardPS[3].m_iValue = m;
+
+                        pShaderCache->AddShader( (ID3D11DeviceChild**)&m_pSceneForwardPS[i][j][k][m], AMD::ShaderCache::SHADER_TYPE_PIXEL, L"ps_5_0", L"RenderSceneForwardPS",
+                            L"Forward.hlsl", 4, ShaderMacroSceneForwardPS, NULL, NULL, 0 );
+                    }
                 }
             }
         }
 
-        AMD::ShaderCache::Macro ShaderMacroLightCullCS[2];
+        AMD::ShaderCache::Macro ShaderMacroLightCullCS[3];
         wcscpy_s( ShaderMacroLightCullCS[0].m_wsName, AMD::ShaderCache::m_uMACRO_MAX_LENGTH, L"TILED_CULLING_COMPUTE_SHADER_MODE" );
         wcscpy_s( ShaderMacroLightCullCS[1].m_wsName, AMD::ShaderCache::m_uMACRO_MAX_LENGTH, L"NUM_MSAA_SAMPLES" );
+        wcscpy_s( ShaderMacroLightCullCS[2].m_wsName, AMD::ShaderCache::m_uMACRO_MAX_LENGTH, L"GCN_SHADER_EXTENSIONS" );
 
         // sanity check
-        assert(NUM_LIGHT_CULLING_COMPUTE_SHADERS == 2*NUM_MSAA_SETTINGS);
+        assert(NUM_LIGHT_CULLING_COMPUTE_SHADERS == 2*2*NUM_MSAA_SETTINGS);
 
         for( int i = 0; i < 2; i++ )
         {
@@ -519,8 +536,15 @@ namespace TiledLighting11
             {
                 // set NUM_MSAA_SAMPLES
                 ShaderMacroLightCullCS[1].m_iValue = g_nMSAASampleCount[j];
-                pShaderCache->AddShader( (ID3D11DeviceChild**)&m_pLightCullCS[NUM_MSAA_SETTINGS*i + j], AMD::ShaderCache::SHADER_TYPE_COMPUTE, L"cs_5_0", L"CullLightsCS",
-                    L"TilingForward.hlsl", 2, ShaderMacroLightCullCS, NULL, NULL, 0 );
+
+                for ( int k = 0; k < 2; k++ )
+                {
+                    // GCN shader extensions enabled/disabled
+                    ShaderMacroLightCullCS[2].m_iValue = k;
+
+                    pShaderCache->AddShader( (ID3D11DeviceChild**)&m_pLightCullCS[j][i][k], AMD::ShaderCache::SHADER_TYPE_COMPUTE, L"cs_5_0", L"CullLightsCS",
+                        L"TilingForward.hlsl", 3, ShaderMacroLightCullCS, NULL, NULL, 0 );
+                }
             }
         }
     }
@@ -565,30 +589,32 @@ namespace TiledLighting11
     //--------------------------------------------------------------------------------------
     // Return one of the forward pixel shaders, based on settings for alpha test, shadows, and VPLs
     //--------------------------------------------------------------------------------------
-    ID3D11PixelShader * ForwardPlusUtil::GetScenePS( bool bAlphaTestEnabled, bool bShadowsEnabled, bool bVPLsEnabled ) const
-    {
+    ID3D11PixelShader * ForwardPlusUtil::GetScenePS( bool bAlphaTestEnabled, bool bShadowsEnabled, bool bVPLsEnabled, bool bGCNShaderExtensions ) const
+    {        
         const int nIndexMultiplierAlphaTest = bAlphaTestEnabled ? 1 : 0;
         const int nIndexMultiplierShadows = bShadowsEnabled ? 1 : 0;
         const int nIndexVPLs = bVPLsEnabled ? 1 : 0;
+        const int nIndexGCNShaderExtensions = bGCNShaderExtensions ? 1 : 0;
 
-        return m_pSceneForwardPS[2*2*nIndexMultiplierAlphaTest + 2*nIndexMultiplierShadows + nIndexVPLs];
+        return m_pSceneForwardPS[nIndexMultiplierAlphaTest][nIndexMultiplierShadows][nIndexVPLs][nIndexGCNShaderExtensions];
     }
 
     //--------------------------------------------------------------------------------------
     // Return one of the light culling compute shaders, based on MSAA settings
     //--------------------------------------------------------------------------------------
-    ID3D11ComputeShader * ForwardPlusUtil::GetLightCullCS( unsigned uMSAASampleCount, bool bVPLsEnabled ) const
+    ID3D11ComputeShader * ForwardPlusUtil::GetLightCullCS( unsigned uMSAASampleCount, bool bVPLsEnabled, bool bGCNShaderExtensions ) const
     {
         // sanity check
-        assert(NUM_LIGHT_CULLING_COMPUTE_SHADERS == 2*NUM_MSAA_SETTINGS);
-
+        assert(NUM_LIGHT_CULLING_COMPUTE_SHADERS == 2*2*NUM_MSAA_SETTINGS);
+        
         const int nIndexMultiplier = bVPLsEnabled ? 1 : 0;
-
+        const int nIndexGCNShaderExtensions = bGCNShaderExtensions ? 1 : 0;
+        
         switch( uMSAASampleCount )
         {
-        case 1: return m_pLightCullCS[NUM_MSAA_SETTINGS*nIndexMultiplier + MSAA_SETTING_NO_MSAA]; break;
-        case 2: return m_pLightCullCS[NUM_MSAA_SETTINGS*nIndexMultiplier + MSAA_SETTING_2X_MSAA]; break;
-        case 4: return m_pLightCullCS[NUM_MSAA_SETTINGS*nIndexMultiplier + MSAA_SETTING_4X_MSAA]; break;
+        case 1: return m_pLightCullCS[MSAA_SETTING_NO_MSAA][nIndexMultiplier][nIndexGCNShaderExtensions]; break;
+        case 2: return m_pLightCullCS[MSAA_SETTING_2X_MSAA][nIndexMultiplier][nIndexGCNShaderExtensions]; break;
+        case 4: return m_pLightCullCS[MSAA_SETTING_4X_MSAA][nIndexMultiplier][nIndexGCNShaderExtensions]; break;
         default: assert(false); break;
         }
 

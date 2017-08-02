@@ -67,8 +67,8 @@ namespace TiledLighting11
         void OnRender( float fElapsedTime, const GuiState& CurrentGuiState, const DepthStencilBuffer& DepthStencilBufferForOpaque, const DepthStencilBuffer& DepthStencilBufferForTransparency, const Scene& Scene, const CommonUtil& CommonUtil, const LightUtil& LightUtil, const ShadowRenderer& ShadowRenderer, const RSMRenderer& RSMRenderer );
 
     private:
-        ID3D11PixelShader * GetScenePS( bool bAlphaTestEnabled, bool bShadowsEnabled, bool bVPLsEnabled ) const;
-        ID3D11ComputeShader * GetLightCullCS( unsigned uMSAASampleCount, bool bVPLsEnabled ) const;
+        ID3D11PixelShader * GetScenePS( bool bAlphaTestEnabled, bool bShadowsEnabled, bool bVPLsEnabled, bool bGCNShaderExtensions ) const;
+        ID3D11ComputeShader * GetLightCullCS( unsigned uMSAASampleCount, bool bVPLsEnabled, bool bGCNShaderExtensions ) const;
 
     private:
         // shaders for Forward+
@@ -80,13 +80,12 @@ namespace TiledLighting11
         ID3D11InputLayout*          m_pLayoutPositionAndTex11;
         ID3D11InputLayout*          m_pLayoutForward11;
 
-        static const int NUM_FORWARD_PIXEL_SHADERS = 2*2*2;  // alpha test on/off, shadows on/off, VPLs on/off
-        ID3D11PixelShader*          m_pSceneForwardPS[NUM_FORWARD_PIXEL_SHADERS];
+        static const int NUM_FORWARD_PIXEL_SHADERS = 2*2*2*2;  // alpha test on/off, shadows on/off, VPLs on/off, GCN shader extensions on/off
+        ID3D11PixelShader*          m_pSceneForwardPS[2][2][2][2];
 
-        // compute shaders for tiled culling
-        static const int NUM_LIGHT_CULLING_COMPUTE_SHADERS = 2*NUM_MSAA_SETTINGS;  // one for each MSAA setting,
-                                                                                   // times two for VPLs enabled/disabled
-        ID3D11ComputeShader*        m_pLightCullCS[NUM_LIGHT_CULLING_COMPUTE_SHADERS];
+        // compute shaders for tiled culling (MSAA mode, VPL enabled/disabled, GCN shader extension enabled/disabled)
+        static const int NUM_LIGHT_CULLING_COMPUTE_SHADERS = NUM_MSAA_SETTINGS*2*2;
+        ID3D11ComputeShader*        m_pLightCullCS[NUM_MSAA_SETTINGS][2][2];
 
         // state for Forward+
         ID3D11BlendState*           m_pBlendStateOpaque;

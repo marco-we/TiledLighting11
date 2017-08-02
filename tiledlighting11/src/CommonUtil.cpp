@@ -297,9 +297,10 @@ namespace TiledLighting11
             m_pGridIB[i] = NULL;
         }
 
+        ID3D11ComputeShader** pLightCullCSForBlendedObjects = &m_pLightCullCSForBlendedObjects[0][0];
         for( int i = 0; i < NUM_LIGHT_CULLING_COMPUTE_SHADERS_FOR_BLENDED_OBJECTS; i++ )
         {
-            m_pLightCullCSForBlendedObjects[i] = NULL;
+            pLightCullCSForBlendedObjects[i] = NULL;
         }
 
         for( int i = 0; i < NUM_FULL_SCREEN_PIXEL_SHADERS; i++ )
@@ -382,9 +383,10 @@ namespace TiledLighting11
             SAFE_RELEASE(m_pGridIB[i]);
         }
 
+        ID3D11ComputeShader** pLightCullCSForBlendedObjects = &m_pLightCullCSForBlendedObjects[0][0];
         for( int i = 0; i < NUM_LIGHT_CULLING_COMPUTE_SHADERS_FOR_BLENDED_OBJECTS; i++ )
         {
-            SAFE_RELEASE(m_pLightCullCSForBlendedObjects[i]);
+            SAFE_RELEASE(pLightCullCSForBlendedObjects[i]);
         }
 
         for( int i = 0; i < NUM_FULL_SCREEN_PIXEL_SHADERS; i++ )
@@ -610,9 +612,10 @@ namespace TiledLighting11
         SAFE_RELEASE(m_pSceneBlendedLayout);
         SAFE_RELEASE(m_pSceneBlendedDepthLayout);
 
+        ID3D11ComputeShader** pLightCullCSForBlendedObjects = &m_pLightCullCSForBlendedObjects[0][0];
         for( int i = 0; i < NUM_LIGHT_CULLING_COMPUTE_SHADERS_FOR_BLENDED_OBJECTS; i++ )
         {
-            SAFE_RELEASE(m_pLightCullCSForBlendedObjects[i]);
+            SAFE_RELEASE(pLightCullCSForBlendedObjects[i]);
         }
 
         SAFE_RELEASE( m_pDebugDrawNumLightsPerTileRadarColorsPS );
@@ -823,9 +826,10 @@ namespace TiledLighting11
         SAFE_RELEASE( m_pSceneBlendedLayout );
         SAFE_RELEASE( m_pSceneBlendedDepthLayout );
 
+        ID3D11ComputeShader** pLightCullCSForBlendedObjects = &m_pLightCullCSForBlendedObjects[0][0];
         for( int i = 0; i < NUM_LIGHT_CULLING_COMPUTE_SHADERS_FOR_BLENDED_OBJECTS; i++ )
         {
-            SAFE_RELEASE(m_pLightCullCSForBlendedObjects[i]);
+            SAFE_RELEASE(pLightCullCSForBlendedObjects[i]);
         }
 
         SAFE_RELEASE( m_pDebugDrawNumLightsPerTileRadarColorsPS );
@@ -935,22 +939,30 @@ namespace TiledLighting11
                 L"Common.hlsl", 1, &ShaderMacroFullScreenPS, NULL, NULL, 0 );
         }
 
-        AMD::ShaderCache::Macro ShaderMacroLightCullCS[2];
+        AMD::ShaderCache::Macro ShaderMacroLightCullCS[3];
         wcscpy_s( ShaderMacroLightCullCS[0].m_wsName, AMD::ShaderCache::m_uMACRO_MAX_LENGTH, L"TILED_CULLING_COMPUTE_SHADER_MODE" );
         wcscpy_s( ShaderMacroLightCullCS[1].m_wsName, AMD::ShaderCache::m_uMACRO_MAX_LENGTH, L"NUM_MSAA_SAMPLES" );
+        wcscpy_s( ShaderMacroLightCullCS[2].m_wsName, AMD::ShaderCache::m_uMACRO_MAX_LENGTH, L"GCN_SHADER_EXTENSIONS" );
 
         // Set TILED_CULLING_COMPUTE_SHADER_MODE to 4 (blended geometry mode)
         ShaderMacroLightCullCS[0].m_iValue = 4;
 
         // sanity check
-        assert(NUM_LIGHT_CULLING_COMPUTE_SHADERS_FOR_BLENDED_OBJECTS == NUM_MSAA_SETTINGS);
+        assert(NUM_LIGHT_CULLING_COMPUTE_SHADERS_FOR_BLENDED_OBJECTS == NUM_MSAA_SETTINGS*2);
 
         for( int i = 0; i < NUM_MSAA_SETTINGS; i++ )
         {
             // set NUM_MSAA_SAMPLES
             ShaderMacroLightCullCS[1].m_iValue = g_nMSAASampleCount[i];
-            pShaderCache->AddShader( (ID3D11DeviceChild**)&m_pLightCullCSForBlendedObjects[i], AMD::ShaderCache::SHADER_TYPE_COMPUTE, L"cs_5_0", L"CullLightsCS",
-                L"TilingForward.hlsl", 2, ShaderMacroLightCullCS, NULL, NULL, 0 );
+
+            for ( int j = 0; j < 2; j++ )
+            {
+                // GCN shader extensions enabled/disabled
+                ShaderMacroLightCullCS[2].m_iValue = j;
+
+                pShaderCache->AddShader( (ID3D11DeviceChild**)&m_pLightCullCSForBlendedObjects[i][j], AMD::ShaderCache::SHADER_TYPE_COMPUTE, L"cs_5_0", L"CullLightsCS",
+                    L"TilingForward.hlsl", 3, ShaderMacroLightCullCS, NULL, NULL, 0 );
+            }
         }
     }
 
@@ -1326,16 +1338,18 @@ namespace TiledLighting11
     //--------------------------------------------------------------------------------------
     // Return one of the light culling compute shaders, based on MSAA settings
     //--------------------------------------------------------------------------------------
-    ID3D11ComputeShader * CommonUtil::GetLightCullCSForBlendedObjects( unsigned uMSAASampleCount ) const
+    ID3D11ComputeShader * CommonUtil::GetLightCullCSForBlendedObjects( unsigned uMSAASampleCount, bool bGCNShaderExtensions ) const
     {
         // sanity check
-        assert(NUM_LIGHT_CULLING_COMPUTE_SHADERS_FOR_BLENDED_OBJECTS == NUM_MSAA_SETTINGS);
+        assert(NUM_LIGHT_CULLING_COMPUTE_SHADERS_FOR_BLENDED_OBJECTS == NUM_MSAA_SETTINGS*2);
+
+        const int nIndexGCNShaderExtensions = bGCNShaderExtensions ? 1 : 0;
 
         switch( uMSAASampleCount )
         {
-        case 1: return m_pLightCullCSForBlendedObjects[MSAA_SETTING_NO_MSAA]; break;
-        case 2: return m_pLightCullCSForBlendedObjects[MSAA_SETTING_2X_MSAA]; break;
-        case 4: return m_pLightCullCSForBlendedObjects[MSAA_SETTING_4X_MSAA]; break;
+        case 1: return m_pLightCullCSForBlendedObjects[MSAA_SETTING_NO_MSAA][nIndexGCNShaderExtensions]; break;
+        case 2: return m_pLightCullCSForBlendedObjects[MSAA_SETTING_2X_MSAA][nIndexGCNShaderExtensions]; break;
+        case 4: return m_pLightCullCSForBlendedObjects[MSAA_SETTING_4X_MSAA][nIndexGCNShaderExtensions]; break;
         default: assert(false); break;
         }
 

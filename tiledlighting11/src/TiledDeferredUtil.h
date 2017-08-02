@@ -68,7 +68,7 @@ namespace TiledLighting11
         void OnRender( float fElapsedTime, const GuiState& CurrentGuiState, const DepthStencilBuffer& DepthStencilBufferForOpaque, const DepthStencilBuffer& DepthStencilBufferForTransparency, const Scene& Scene, const CommonUtil& CommonUtil, const LightUtil& LightUtil, const ShadowRenderer& ShadowRenderer, const RSMRenderer& RSMRenderer );
 
     private:
-        ID3D11ComputeShader * GetLightCullAndShadeCS( unsigned uMSAASampleCount, int nNumGBufferRenderTargets, bool bShadowsEnabled, bool bVPLsEnabled ) const;
+        ID3D11ComputeShader * GetLightCullAndShadeCS( unsigned uMSAASampleCount, int nNumGBufferRenderTargets, bool bShadowsEnabled, bool bVPLsEnabled, bool bGCNShaderExtensions ) const;
         ID3D11ComputeShader * GetDebugDrawNumLightsPerTileCS( unsigned uMSAASampleCount, int nDebugDrawType, bool bVPLsEnabled ) const;
 
     private:
@@ -89,15 +89,16 @@ namespace TiledLighting11
         ID3D11PixelShader*          m_pSceneDeferredBuildGBufferPS[NUM_GBUFFER_PIXEL_SHADERS];
         ID3D11InputLayout*          m_pLayoutDeferredBuildGBuffer11;
 
-        // compute shaders for tiled culling and shading
-        static const int NUM_DEFERRED_LIGHTING_COMPUTE_SHADERS = 2*2*NUM_MSAA_SETTINGS*(MAX_NUM_GBUFFER_RENDER_TARGETS-1);
-        ID3D11ComputeShader*        m_pLightCullAndShadeCS[NUM_DEFERRED_LIGHTING_COMPUTE_SHADERS];
+        // compute shaders for tiled culling and shading 
+        // (num GBUFFER render targets, MSAA mode, shadows enabled/disabled, VPLs enabled/disabled, GCN shader extensions enabled disabled)
+        static const int NUM_DEFERRED_LIGHTING_COMPUTE_SHADERS = 2*2*2*NUM_MSAA_SETTINGS*(MAX_NUM_GBUFFER_RENDER_TARGETS-1);
+        ID3D11ComputeShader*        m_pLightCullAndShadeCS[MAX_NUM_GBUFFER_RENDER_TARGETS - 1][NUM_MSAA_SETTINGS][2][2][2];
 
         // debug draw shaders for the lights-per-tile visualization modes
-        static const int NUM_DEBUG_DRAW_COMPUTE_SHADERS = 2*2*NUM_MSAA_SETTINGS;  // one for each MSAA setting,
+        static const int NUM_DEBUG_DRAW_COMPUTE_SHADERS = NUM_MSAA_SETTINGS*2*2;  // one for each MSAA setting,
                                                                                   // times 2 for VPL on/off,
                                                                                   // times 2 for radar vs. grayscale
-        ID3D11ComputeShader*        m_pDebugDrawNumLightsPerTileCS[NUM_DEBUG_DRAW_COMPUTE_SHADERS];
+        ID3D11ComputeShader*        m_pDebugDrawNumLightsPerTileCS[NUM_MSAA_SETTINGS][2][2];
 
         // state for Tiled Deferred
         ID3D11BlendState*           m_pBlendStateOpaque;
