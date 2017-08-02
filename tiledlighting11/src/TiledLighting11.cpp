@@ -127,8 +127,7 @@ static float                g_fMaxDistance = 500.0f;
 
 AGSContext*                 g_AGSContext = nullptr;
 AGSGPUInfo                  g_AGSGPUInfo;
-bool                        g_MbcntExtensionSupported = false;
-bool                        g_ReadfirstlaneExtensionSupported = false;
+bool                        g_ShaderExtensionsSupported = false;
 
 //--------------------------------------------------------------------------------------
 // Constant buffers
@@ -219,8 +218,7 @@ enum
     IDC_RADIOBUTTON_FORWARD_PLUS,
     IDC_RADIOBUTTON_TILED_DEFERRED,
     IDC_CHECKBOX_ENABLE_LIGHT_DRAWING,
-    IDC_CHECKBOX_USE_MBCNT,
-    IDC_CHECKBOX_USE_READFIRSTLANE,
+    IDC_CHECKBOX_USE_SHADER_EXTENSIONS,
     IDC_SLIDER_NUM_POINT_LIGHTS,
     IDC_SLIDER_NUM_SPOT_LIGHTS,
     IDC_CHECKBOX_ENABLE_TRANSPARENT_OBJECTS,
@@ -237,6 +235,7 @@ enum
     IDC_SLIDER_NUM_GBUFFER_RTS,
     IDC_RENDERING_METHOD_GROUP,
     IDC_TILE_DRAWING_GROUP,
+    IDC_BUTTON_TRACK_STATS,
     IDC_NUM_CONTROL_IDS
 };
 
@@ -274,6 +273,84 @@ void UpdateCameraConstantBufferWithTranspose( const XMMATRIX& mViewProj );
 void RenderDepthOnlyScene();
 void UpdateUI();
 
+#include <string>
+#include <fstream>
+
+struct GPUStatEntry
+{
+    float fps, total, gpuTime0, gpuTime1, gpuTime2;
+};
+std::vector<GPUStatEntry> g_gpuStats[2];
+bool g_trackingStats = false;
+unsigned int g_statsPeriod = 0;
+unsigned int g_trackedFrame = 0;
+const unsigned int FRAMES_TO_TRACK = 600;
+
+void StartTrackGPUStats()
+{
+    if ( g_trackingStats )
+        return;
+    g_trackingStats = true;
+    g_trackedFrame = 0;
+    g_HUD.m_GUI.GetButton( IDC_BUTTON_TRACK_STATS )->SetEnabled( false );
+}
+
+void StopTrackGPUStats()
+{
+    if ( !g_trackingStats )
+        return;
+    
+    if ( !g_gpuStats[0].empty() )
+    {
+        // write to stats_<g_statsPeriod>_forward_plus.txt
+        std::string filename = "stats_forward_" + std::to_string( g_statsPeriod ) + ".csv";
+        std::ofstream file( filename.c_str() );
+        if ( file.is_open() )
+        {
+            file << "FPS, Total, z-pass, cull, forward" << std::endl;
+            for ( int i = 0; i < g_gpuStats[0].size(); ++i )
+            {
+                GPUStatEntry stat = g_gpuStats[0][i];
+                file << stat.fps << ", " << stat.total << ", " << stat.gpuTime0 << ", " << stat.gpuTime1 << ", " << stat.gpuTime2 << std::endl;
+            }
+        }
+    }
+
+    if ( !g_gpuStats[1].empty() )
+    {
+        // write to stats_<g_statsPeriod>_deferred.txt
+        std::string filename = "stats_deferred_" + std::to_string( g_statsPeriod ) + ".csv";
+        std::ofstream file( filename.c_str() );
+        if ( file.is_open() )
+        {
+            file << "FPS, Total, g-buffer, cull and light, transparency" << std::endl;
+            for ( int i = 0; i < g_gpuStats[1].size(); ++i )
+            {
+                GPUStatEntry stat = g_gpuStats[1][i];
+                file << stat.fps << ", " << stat.total << ", " << stat.gpuTime0 << ", " << stat.gpuTime1 << ", " << stat.gpuTime2 << std::endl;
+            }
+        }
+    }
+
+    g_statsPeriod++;    
+    g_gpuStats[0].clear();
+    g_gpuStats[1].clear();
+    
+    g_HUD.m_GUI.GetButton( IDC_BUTTON_TRACK_STATS )->SetEnabled( true );
+    g_trackingStats = false;
+}
+
+void UpdateTrackGPUStats()
+{
+    if ( g_trackingStats )
+    {
+        if ( ++g_trackedFrame > FRAMES_TO_TRACK )
+        {
+            StopTrackGPUStats();
+        }
+    }
+}
+
 //--------------------------------------------------------------------------------------
 // Entry point to the program. Initializes everything and goes into a message processing 
 // loop. Idle time is used to render the scene.
@@ -287,7 +364,7 @@ int WINAPI wWinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdL
 
     // Initialise AGS lib
     agsInit(&g_AGSContext, nullptr, &g_AGSGPUInfo);
-    
+        
     // Set DXUT callbacks
     DXUTSetCallbackMsgProc( MsgProc );
     DXUTSetCallbackKeyboard( OnKeyboard );
@@ -336,6 +413,9 @@ void InitApp()
     g_HUD.m_GUI.SetCallback( OnGUIEvent );
 
     int iY = AMD::HUD::iElementDelta;
+
+    g_HUD.m_GUI.AddButton( IDC_BUTTON_TRACK_STATS, L"Track Stats", AMD::HUD::iElementOffset, iY, AMD::HUD::iElementWidth, AMD::HUD::iElementHeight );
+    iY += AMD::HUD::iElementDelta;
 
     g_HUD.m_GUI.AddButton( IDC_BUTTON_TOGGLEFULLSCREEN, L"Toggle full screen", AMD::HUD::iElementOffset, iY, AMD::HUD::iElementWidth, AMD::HUD::iElementHeight );
     g_HUD.m_GUI.AddButton( IDC_BUTTON_CHANGEDEVICE, L"Change device (F2)", AMD::HUD::iElementOffset, iY += AMD::HUD::iElementDelta, AMD::HUD::iElementWidth, AMD::HUD::iElementHeight, VK_F2 );
@@ -402,8 +482,7 @@ void InitApp()
 
     iY += AMD::HUD::iGroupDelta;
 
-    g_HUD.m_GUI.AddCheckBox(IDC_CHECKBOX_USE_MBCNT, L"Use mbcnt", AMD::HUD::iElementOffset, iY, AMD::HUD::iElementWidth, AMD::HUD::iElementHeight, false);
-    g_HUD.m_GUI.AddCheckBox(IDC_CHECKBOX_USE_READFIRSTLANE, L"Use readfirstlane", AMD::HUD::iElementOffset, iY += AMD::HUD::iElementDelta, AMD::HUD::iElementWidth, AMD::HUD::iElementHeight, false);
+    g_HUD.m_GUI.AddCheckBox(IDC_CHECKBOX_USE_SHADER_EXTENSIONS, L"Use shader extensions", AMD::HUD::iElementOffset, iY, AMD::HUD::iElementWidth, AMD::HUD::iElementHeight, false);
 
     // Initialize the static data in CommonUtil
     g_CommonUtil.InitStaticData();
@@ -506,6 +585,12 @@ void RenderText()
         fGpuPerfStat2 = fGpuTimeForwardTransparency;
     }
 
+    if (g_trackingStats)
+    {                
+        GPUStatEntry entry = { DXUTGetFPS(), fGpuTime, fGpuPerfStat0, fGpuPerfStat1, fGpuPerfStat2 };
+        g_gpuStats[bForwardPlus ? 0 : 1].push_back(entry);
+    }
+
     g_pTxtHelper->SetInsertionPos( 5, DXUTGetDXGIBackBufferSurfaceDesc()->Height - AMD::HUD::iElementDelta );
     g_pTxtHelper->DrawTextLine( L"Toggle GUI    : F1" );
 
@@ -534,28 +619,24 @@ void InitExtensions()
     {
         unsigned int extensionsSupported = 0;
         if (agsDriverExtensionsDX11_Init(g_AGSContext, DXUTGetD3D11Device(), 7, &extensionsSupported) == AGS_SUCCESS)
-        {
-            if (extensionsSupported & AGS_DX11_EXTENSION_INTRINSIC_READFIRSTLANE)
+        {            
+            if ((extensionsSupported & AGS_DX11_EXTENSION_INTRINSIC_MBCOUNT) && 
+                (extensionsSupported & AGS_DX11_EXTENSION_INTRINSIC_BALLOT) &&
+                (extensionsSupported & AGS_DX11_EXTENSION_INTRINSIC_READFIRSTLANE) && 
+                (extensionsSupported & AGS_DX11_EXTENSION_INTRINSIC_READLANE) && 
+                (extensionsSupported & AGS_DX11_EXTENSION_INTRINSIC_LANEID))
             {
-                // the readfirstlane extension is supported so use this codepath
-                g_ReadfirstlaneExtensionSupported = true;
-            }
-            
-            if (extensionsSupported & AGS_DX11_EXTENSION_INTRINSIC_MBCOUNT)
-            {
-                // the mbnct extension is supported so use this codepath
-                g_MbcntExtensionSupported = true;
-            }            
+                // the required extensions are supported so use this codepath
+                g_ShaderExtensionsSupported = true;
+            }   
         }
     }
     else
     {
-        g_ReadfirstlaneExtensionSupported = false;
-        g_MbcntExtensionSupported = false;
+        g_ShaderExtensionsSupported = false;
     }
 
-    g_HUD.m_GUI.GetCheckBox(IDC_CHECKBOX_USE_READFIRSTLANE)->SetVisible(g_ReadfirstlaneExtensionSupported);
-    g_HUD.m_GUI.GetCheckBox(IDC_CHECKBOX_USE_MBCNT)->SetVisible(g_MbcntExtensionSupported);
+    g_HUD.m_GUI.GetCheckBox(IDC_CHECKBOX_USE_SHADER_EXTENSIONS)->SetVisible(g_ShaderExtensionsSupported);
 }
 
 //--------------------------------------------------------------------------------------
@@ -726,6 +807,8 @@ HRESULT CALLBACK OnD3D11ResizedSwapChain( ID3D11Device* pd3dDevice, IDXGISwapCha
 void CALLBACK OnD3D11FrameRender( ID3D11Device* pd3dDevice, ID3D11DeviceContext* pd3dImmediateContext, double fTime,
                                  float fElapsedTime, void* pUserContext )
 {
+    UpdateTrackGPUStats();
+
     // Reset the timer at start of frame
     TIMER_Reset();
 
@@ -760,11 +843,8 @@ void CALLBACK OnD3D11FrameRender( ID3D11Device* pd3dDevice, ID3D11DeviceContext*
         g_CurrentGuiState.m_nDebugDrawType = bDebugDrawMethodOne ? DEBUG_DRAW_RADAR_COLORS : DEBUG_DRAW_GRAYSCALE;
     }
 
-    // Check GUI state for Mbcnt enabled TODO check for extension
-    g_CurrentGuiState.m_bUseMbcntEnabled = g_HUD.m_GUI.GetCheckBox(IDC_CHECKBOX_USE_MBCNT)->GetEnabled() && g_MbcntExtensionSupported;
-
-    // Check GUI state for Readfirstlane enabled TODO check for extension
-    g_CurrentGuiState.m_bUseReadFirstlaneEnabled = g_HUD.m_GUI.GetCheckBox(IDC_CHECKBOX_USE_READFIRSTLANE)->GetEnabled() && g_ReadfirstlaneExtensionSupported;
+    // Check GUI state for shader extensions
+    g_CurrentGuiState.m_bUseShaderExtensions = g_HUD.m_GUI.GetCheckBox( IDC_CHECKBOX_USE_SHADER_EXTENSIONS )->GetChecked() && g_ShaderExtensionsSupported;
 
     // Check GUI state for light drawing enabled
     g_CurrentGuiState.m_bLightDrawingEnabled = g_HUD.m_GUI.GetCheckBox( IDC_CHECKBOX_ENABLE_LIGHT_DRAWING )->GetEnabled() &&
@@ -1127,7 +1207,7 @@ LRESULT CALLBACK MsgProc( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, bo
         return 0;
     
     // Pass all remaining windows messages to camera so it can respond to user input
-    g_Camera.HandleMessages( hWnd, uMsg, wParam, lParam );
+    g_Camera.HandleMessages( hWnd, uMsg, wParam, lParam );    
 
     return 0;
 }
@@ -1159,6 +1239,10 @@ void CALLBACK OnGUIEvent( UINT nEvent, int nControlID, CDXUTControl* pControl, v
 
     switch( nControlID )
     {
+        case IDC_BUTTON_TRACK_STATS:
+            StartTrackGPUStats();
+            break;
+
         case IDC_BUTTON_TOGGLEFULLSCREEN:
             DXUTToggleFullScreen();
             break;
