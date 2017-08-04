@@ -122,6 +122,75 @@ groupshared uint ldsEdgePixelIdx[NUM_THREADS_PER_TILE];
 #endif
 
 //-----------------------------------------------------------------------------------------
+// Helper macros
+//-----------------------------------------------------------------------------------------
+
+#if USE_BALLOT
+
+#define REDUCTION_V1(LIGHT_CNT, LIGHT_LIST, RANGE_CMP)\
+    {\
+        bool withinRange = withinFrustum && RANGE_CMP;\
+        uint2 ballot = AmdDxExtShaderIntrinsics_Ballot( withinRange );\
+        if ( any( ballot ) )\
+        {\
+            uint sharedIdx = 0;\
+            if ( AmdDxExtShaderIntrinsics_LaneId() == 0 )\
+            {\
+                uint cnt = countbits( ballot.x ) + countbits( ballot.y );\
+                InterlockedAdd( LIGHT_CNT, cnt, sharedIdx );\
+            }\
+            sharedIdx = AmdDxExtShaderIntrinsics_ReadlaneU( sharedIdx, 0 );\
+            if ( withinRange )\
+                LIGHT_LIST[sharedIdx + AmdDxExtShaderIntrinsics_MBCnt( ballot )] = i;\
+        }\
+    }
+
+#define REDUCTION_V2(LIGHT_CNT, LIGHT_LIST, RANGE_CMP)\
+    {\
+        if (withinFrustum)\
+        {\
+            bool withinRange = RANGE_CMP;\
+            uint2 ballot = AmdDxExtShaderIntrinsics_Ballot( withinRange );\
+            if ( any( ballot ) )\
+            {\
+                uint sharedIdx = 0;\
+                if ( AmdDxExtShaderIntrinsics_LaneId() == 0 )\
+                {\
+                    uint cnt = countbits( ballot.x ) + countbits( ballot.y );\
+                    InterlockedAdd( LIGHT_CNT, cnt, sharedIdx );\
+                }\
+                sharedIdx = AmdDxExtShaderIntrinsics_ReadlaneU( sharedIdx, 0 );\
+                if ( withinRange )\
+                    LIGHT_LIST[sharedIdx + AmdDxExtShaderIntrinsics_MBCnt( ballot )] = i;\
+            }\
+        }\
+    }    
+
+#define REDUCTION_V3(LIGHT_CNT, LIGHT_LIST, RANGE_CMP)\
+    {\
+        bool withinRange = withinFrustum && RANGE_CMP;\
+        uint2 ballot = AmdDxExtShaderIntrinsics_Ballot( withinRange );\
+        if ( any( ballot ) )\
+        {\
+            uint sharedIdx = 0;\
+            if ( AmdDxExtShaderIntrinsics_LaneId() == 0 )\
+            {\
+                uint cnt = countbits( ballot.x ) + countbits( ballot.y );\
+                InterlockedAdd( LIGHT_CNT, cnt, sharedIdx );\
+            }\
+            if ( withinRange )\
+            {\
+                sharedIdx = AmdDxExtShaderIntrinsics_ReadlaneU( sharedIdx, 0 );\
+                LIGHT_LIST[sharedIdx + AmdDxExtShaderIntrinsics_MBCnt( ballot )] = i;\
+            }\
+        }\
+    }
+
+#define REDUCTION(LIGHT_CNT, LIGHT_LIST, RANGE_CMP) REDUCTION_V3(LIGHT_CNT, LIGHT_LIST, RANGE_CMP)
+
+#endif
+
+//-----------------------------------------------------------------------------------------
 // Helper functions
 //-----------------------------------------------------------------------------------------
 
@@ -404,50 +473,14 @@ DoLightCulling( in uint3 globalIdx, in uint localIdxFlattened, in uint3 groupIdx
         float4 center = g_PointLightBufferCenterAndRadius[i];
         float r = center.w;
         center.xyz = mul( float4(center.xyz, 1), g_mView ).xyz;
-        
+
         bool withinFrustum = (GetSignedDistanceFromPlane( center, frustumEqn[0] ) < r) &&
             (GetSignedDistanceFromPlane( center, frustumEqn[1] ) < r) &&
             (GetSignedDistanceFromPlane( center, frustumEqn[2] ) < r) &&
             (GetSignedDistanceFromPlane( center, frustumEqn[3] ) < r);
 
-        if ( AmdDxExtShaderIntrinsics_BallotAny( withinFrustum ) )
-        {
-            {
-                bool withinRange = -center.z + minZ < r && center.z - fHalfZ < r;
-                uint2 ballot = AmdDxExtShaderIntrinsics_Ballot( withinRange && withinFrustum );
-                if ( any( ballot ) )
-                {
-                    uint sharedIdx = 0;
-                    if ( localIdxFlattened == 0 )
-                    {
-                        uint cnt = countbits( ballot.x ) + countbits( ballot.y );
-                        InterlockedAdd( ldsLightIdxCounterA, cnt, sharedIdx );
-                    }
-                    sharedIdx = AmdDxExtShaderIntrinsics_ReadlaneU( sharedIdx, 0 );
-
-                    if ( withinRange && withinFrustum )
-                        ldsLightIdx[sharedIdx + AmdDxExtShaderIntrinsics_MBCnt( ballot )] = i;
-                }
-            }
-
-            {
-                bool withinRange = -center.z + fHalfZ < r && center.z - maxZ < r;
-                uint2 ballot = AmdDxExtShaderIntrinsics_Ballot( withinRange && withinFrustum );
-                if ( any( ballot ) )
-                {
-                    uint sharedIdx = 0;
-                    if ( localIdxFlattened == 0 )
-                    {
-                        uint cnt = countbits( ballot.x ) + countbits( ballot.y );
-                        InterlockedAdd( ldsLightIdxCounterB, cnt, sharedIdx );
-                    }
-                    sharedIdx = AmdDxExtShaderIntrinsics_ReadlaneU( sharedIdx, 0 );
-
-                    if ( withinRange && withinFrustum )
-                        ldsLightIdx[sharedIdx + AmdDxExtShaderIntrinsics_MBCnt( ballot )] = i;
-                }
-            }
-        }
+        REDUCTION(ldsLightIdxCounterA, ldsLightIdx, (-center.z + minZ < r && center.z - fHalfZ < r))
+        REDUCTION(ldsLightIdxCounterB, ldsLightIdx, (-center.z + fHalfZ < r && center.z - maxZ < r))
     }
   
     // loop over the spot lights and do a sphere vs. frustum intersection test
@@ -457,50 +490,37 @@ DoLightCulling( in uint3 globalIdx, in uint localIdxFlattened, in uint3 groupIdx
         float r = center.w;
         center.xyz = mul( float4( center.xyz, 1 ), g_mView ).xyz;
 
-        bool withinFrustum = ( GetSignedDistanceFromPlane( center, frustumEqn[0] ) < r) &&
-             ( GetSignedDistanceFromPlane( center, frustumEqn[1] ) < r) &&
-             ( GetSignedDistanceFromPlane( center, frustumEqn[2] ) < r) &&
-             ( GetSignedDistanceFromPlane( center, frustumEqn[3] ) < r);
+        bool withinFrustum = (GetSignedDistanceFromPlane( center, frustumEqn[0] ) < r) &&
+            (GetSignedDistanceFromPlane( center, frustumEqn[1] ) < r) &&
+            (GetSignedDistanceFromPlane( center, frustumEqn[2] ) < r) &&
+            (GetSignedDistanceFromPlane( center, frustumEqn[3] ) < r);
 
-        if ( AmdDxExtShaderIntrinsics_BallotAny( withinFrustum ) )
-        {
-            {
-                bool withinRange = -center.z + minZ < r && center.z - fHalfZ < r;
-                uint2 ballot = AmdDxExtShaderIntrinsics_Ballot( withinRange && withinFrustum );
-                if ( any( ballot ) )
-                {
-                    uint sharedIdx = 0;
-                    if ( localIdxFlattened == 0 )
-                    {
-                        uint cnt = countbits( ballot.x ) + countbits( ballot.y );
-                        InterlockedAdd( ldsSpotIdxCounterA, cnt, sharedIdx );
-                    }
-                    sharedIdx = AmdDxExtShaderIntrinsics_ReadlaneU( sharedIdx, 0 );
-
-                    if ( withinRange && withinFrustum )
-                        ldsSpotIdx[sharedIdx + AmdDxExtShaderIntrinsics_MBCnt( ballot )] = i;
-                }
-            }
-
-            {
-                bool withinRange = -center.z + fHalfZ < r && center.z - maxZ < r;
-                uint2 ballot = AmdDxExtShaderIntrinsics_Ballot( withinRange && withinFrustum );
-                if ( any( ballot ) )
-                {
-                    uint sharedIdx = 0;
-                    if ( localIdxFlattened == 0 )
-                    {
-                        uint cnt = countbits( ballot.x ) + countbits( ballot.y );
-                        InterlockedAdd( ldsSpotIdxCounterB, cnt, sharedIdx );
-                    }
-                    sharedIdx = AmdDxExtShaderIntrinsics_ReadlaneU( sharedIdx, 0 );
-
-                    if ( withinRange && withinFrustum )
-                        ldsSpotIdx[sharedIdx + AmdDxExtShaderIntrinsics_MBCnt( ballot )] = i;
-                }
-            }
-        }
+        REDUCTION(ldsSpotIdxCounterA, ldsSpotIdx, (-center.z + minZ < r && center.z - fHalfZ < r))
+        REDUCTION(ldsSpotIdxCounterB, ldsSpotIdx, (-center.z + fHalfZ < r && center.z - maxZ < r))
     }
+
+// Only process VPLs for opaque geometry. The effect is barely 
+// noticeable on transparent geometry, so skip it, to save perf.
+#if ( VPLS_ENABLED == 1 )
+    // if VPLs are disabled we can't rely on the internal UAV counter being zero hence check against MaxVPLs which is then zero
+    uint numVPLs = min( g_uMaxVPLs, g_uNumVPLs );
+
+    // loop over the VPLs and do a sphere vs. frustum intersection test
+    for(uint k=localIdxFlattened; k<numVPLs; k+=NUM_THREADS_PER_TILE)
+    {
+        float4 center = g_VPLBufferCenterAndRadius[k];
+        float r = center.w;
+        center.xyz = mul( float4(center.xyz, 1), g_mView ).xyz;
+
+        bool withinFrustum = (GetSignedDistanceFromPlane( center, frustumEqn[0] ) < r) &&
+            (GetSignedDistanceFromPlane( center, frustumEqn[1] ) < r) &&
+            (GetSignedDistanceFromPlane( center, frustumEqn[2] ) < r) &&
+            (GetSignedDistanceFromPlane( center, frustumEqn[3] ) < r);
+
+        REDUCTION(ldsVPLIdxCounterA, ldsVPLIdx, (-center.z + minZ < r && center.z - fHalfZ < r))
+        REDUCTION(ldsVPLIdxCounterB, ldsVPLIdx, (-center.z + fHalfZ < r && center.z - maxZ < r))        
+    }
+#endif    
 
 #else // !USE_BALLOT
 
@@ -567,7 +587,6 @@ DoLightCulling( in uint3 globalIdx, in uint localIdxFlattened, in uint3 groupIdx
             }
         }
     }
-#endif // !USE_BALLOT
 
 // Only process VPLs for opaque geometry. The effect is barely 
 // noticeable on transparent geometry, so skip it, to save perf.
@@ -607,6 +626,8 @@ DoLightCulling( in uint3 globalIdx, in uint localIdxFlattened, in uint3 groupIdx
         }
     }
 #endif
+
+#endif // !USE_BALLOT
 
     GroupMemoryBarrierWithGroupSync();
 
