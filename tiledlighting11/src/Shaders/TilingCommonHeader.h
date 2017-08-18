@@ -525,19 +525,19 @@ DoLightCulling( in uint3 globalIdx, in uint localIdxFlattened, in uint3 groupIdx
 #else // !USE_BALLOT
 
     // loop over the lights and do a sphere vs. frustum intersection test
-    for ( uint i = localIdxFlattened; i<g_uNumLights; i += NUM_THREADS_PER_TILE )
+    for(uint i=localIdxFlattened; i<g_uNumLights; i+=NUM_THREADS_PER_TILE)
     {
         float4 center = g_PointLightBufferCenterAndRadius[i];
         float r = center.w;
-        center.xyz = mul( float4( center.xyz, 1 ), g_mView ).xyz;
+        center.xyz = mul( float4(center.xyz, 1), g_mView ).xyz;
 
         // test if sphere is intersecting or inside frustum
-        if ( (GetSignedDistanceFromPlane( center, frustumEqn[0] ) < r) &&
-            (GetSignedDistanceFromPlane( center, frustumEqn[1] ) < r) &&
-            (GetSignedDistanceFromPlane( center, frustumEqn[2] ) < r) &&
-            (GetSignedDistanceFromPlane( center, frustumEqn[3] ) < r) )
+        if( ( GetSignedDistanceFromPlane( center, frustumEqn[0] ) < r ) &&
+            ( GetSignedDistanceFromPlane( center, frustumEqn[1] ) < r ) &&
+            ( GetSignedDistanceFromPlane( center, frustumEqn[2] ) < r ) &&
+            ( GetSignedDistanceFromPlane( center, frustumEqn[3] ) < r ) )
         {
-            if ( -center.z + minZ < r && center.z - fHalfZ < r )
+            if( -center.z + minZ < r && center.z - fHalfZ < r )
             {
                 // do a thread-safe increment of the list counter 
                 // and put the index of this light into the list
@@ -545,7 +545,7 @@ DoLightCulling( in uint3 globalIdx, in uint localIdxFlattened, in uint3 groupIdx
                 InterlockedAdd( ldsLightIdxCounterA, 1, dstIdx );
                 ldsLightIdx[dstIdx] = i;
             }
-            if ( -center.z + fHalfZ < r && center.z - maxZ < r )
+            if( -center.z + fHalfZ < r && center.z - maxZ < r )
             {
                 // do a thread-safe increment of the list counter 
                 // and put the index of this light into the list
@@ -557,19 +557,19 @@ DoLightCulling( in uint3 globalIdx, in uint localIdxFlattened, in uint3 groupIdx
     }
 
     // loop over the spot lights and do a sphere vs. frustum intersection test
-    for ( uint j = localIdxFlattened; j<g_uNumSpotLights; j += NUM_THREADS_PER_TILE )
+    for(uint j=localIdxFlattened; j<g_uNumSpotLights; j+=NUM_THREADS_PER_TILE)
     {
         float4 center = g_SpotLightBufferCenterAndRadius[j];
         float r = center.w;
-        center.xyz = mul( float4( center.xyz, 1 ), g_mView ).xyz;
+        center.xyz = mul( float4(center.xyz, 1), g_mView ).xyz;
 
         // test if sphere is intersecting or inside frustum
-        if ( (GetSignedDistanceFromPlane( center, frustumEqn[0] ) < r) &&
-            (GetSignedDistanceFromPlane( center, frustumEqn[1] ) < r) &&
-            (GetSignedDistanceFromPlane( center, frustumEqn[2] ) < r) &&
-            (GetSignedDistanceFromPlane( center, frustumEqn[3] ) < r) )
+        if( ( GetSignedDistanceFromPlane( center, frustumEqn[0] ) < r ) &&
+            ( GetSignedDistanceFromPlane( center, frustumEqn[1] ) < r ) &&
+            ( GetSignedDistanceFromPlane( center, frustumEqn[2] ) < r ) &&
+            ( GetSignedDistanceFromPlane( center, frustumEqn[3] ) < r ) )
         {
-            if ( -center.z + minZ < r && center.z - fHalfZ < r )
+            if( -center.z + minZ < r && center.z - fHalfZ < r )
             {
                 // do a thread-safe increment of the list counter 
                 // and put the index of this light into the list
@@ -577,7 +577,7 @@ DoLightCulling( in uint3 globalIdx, in uint localIdxFlattened, in uint3 groupIdx
                 InterlockedAdd( ldsSpotIdxCounterA, 1, dstIdx );
                 ldsSpotIdx[dstIdx] = j;
             }
-            if ( -center.z + fHalfZ < r && center.z - maxZ < r )
+            if( -center.z + fHalfZ < r && center.z - maxZ < r )
             {
                 // do a thread-safe increment of the list counter 
                 // and put the index of this light into the list
