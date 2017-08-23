@@ -37,6 +37,7 @@
 #include "LightUtil.h"
 #include "ShadowRenderer.h"
 #include "RSMRenderer.h"
+#include "GPAWrapper.h"
 
 #pragma warning( disable : 4100 ) // disable unreference formal parameter warnings for /W4 builds
 
@@ -358,6 +359,9 @@ namespace TiledLighting11
 
             TIMER_Begin( 0, L"Cull and light" );
             {
+                if ( CurrentGuiState.m_bGPAProfilingEnabled )
+                    GPAHelper::BeginSample( "Cull and light" );
+
                 // Cull lights and do lighting on the GPU, using a single Compute Shader
                 pd3dImmediateContext->OMSetRenderTargets( (unsigned)CurrentGuiState.m_nNumGBufferRenderTargets, pNULLRTVs, pNULLDSV );  // null color buffers and depth-stencil
                 pd3dImmediateContext->OMSetDepthStencilState( CommonUtil.GetDepthStencilState(DEPTH_STENCIL_STATE_DISABLE_DEPTH_TEST), 0x00 );
@@ -417,6 +421,9 @@ namespace TiledLighting11
                 pd3dImmediateContext->CSSetShaderResources( 2, 1, &pNULLSRV );
                 pd3dImmediateContext->CSSetShaderResources( 3, 1, &pNULLSRV );
                 pd3dImmediateContext->CSSetUnorderedAccessViews( 0, 1, &pNULLUAV, NULL );
+
+                if ( CurrentGuiState.m_bGPAProfilingEnabled )
+                    GPAWrapper::Instance().EndSample();
             }
             TIMER_End(); // Cull and light
 

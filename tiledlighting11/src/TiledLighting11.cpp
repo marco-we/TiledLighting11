@@ -48,6 +48,7 @@
 #include "TiledDeferredUtil.h"
 #include "ShadowRenderer.h"
 #include "RSMRenderer.h"
+#include "GPAWrapper.h"
 
 #include "..\\..\\..\\ags_lib\\inc\\amd_ags.h"
 
@@ -128,6 +129,8 @@ static float                g_fMaxDistance = 500.0f;
 AGSContext*                 g_AGSContext = nullptr;
 AGSGPUInfo                  g_AGSGPUInfo;
 bool                        g_ShaderExtensionsSupported = false;
+
+uint32_t                    g_CurrentWaitSessionId = 1;
 
 //--------------------------------------------------------------------------------------
 // Constant buffers
@@ -219,6 +222,7 @@ enum
     IDC_RADIOBUTTON_TILED_DEFERRED,
     IDC_CHECKBOX_ENABLE_LIGHT_DRAWING,
     IDC_CHECKBOX_USE_SHADER_EXTENSIONS,
+    IDC_CHECKBOX_ENABLE_GPA_PROFILING,
     IDC_SLIDER_NUM_POINT_LIGHTS,
     IDC_SLIDER_NUM_SPOT_LIGHTS,
     IDC_CHECKBOX_ENABLE_TRANSPARENT_OBJECTS,
@@ -364,7 +368,11 @@ int WINAPI wWinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdL
 
     // Initialise AGS lib
     agsInit(&g_AGSContext, nullptr, &g_AGSGPUInfo);
-        
+
+    GPAWrapper& gpa = GPAWrapper::Instance();
+    if ( gpa.IsGPASupported() )
+        gpa.Initialize();
+
     // Set DXUT callbacks
     DXUTSetCallbackMsgProc( MsgProc );
     DXUTSetCallbackKeyboard( OnKeyboard );
@@ -484,6 +492,8 @@ void InitApp()
 
     g_HUD.m_GUI.AddCheckBox(IDC_CHECKBOX_USE_SHADER_EXTENSIONS, L"Use shader extensions", AMD::HUD::iElementOffset, iY, AMD::HUD::iElementWidth, AMD::HUD::iElementHeight, false);
 
+    g_HUD.m_GUI.AddCheckBox( IDC_CHECKBOX_ENABLE_GPA_PROFILING, L"Profile", AMD::HUD::iElementOffset, iY += AMD::HUD::iElementDelta, AMD::HUD::iElementWidth, AMD::HUD::iElementHeight, false );
+
     // Initialize the static data in CommonUtil
     g_CommonUtil.InitStaticData();
 
@@ -591,6 +601,66 @@ void RenderText()
         g_gpuStats[bForwardPlus ? 0 : 1].push_back(entry);
     }
 
+    GPAWrapper& gpa = GPAWrapper::Instance();
+    if ( g_CurrentGuiState.m_bGPAProfilingEnabled )
+    {
+        g_pTxtHelper->DrawTextLine( L"" );
+        g_pTxtHelper->DrawTextLine( L"GPA counters:" );
+
+        uint32_t count;
+        gpa.GetEnabledCount( &count );
+
+        uint32_t sampleCount;
+        gpa.GetSampleCount( g_CurrentWaitSessionId, &sampleCount );
+        for ( uint32_t sample = 0; sample < sampleCount; sample++ )
+        {
+            const char* sampleName = GPAHelper::GetSampleName( sample );
+            swprintf_s( szBuf, 256, L"+------%S", sampleName );
+            g_pTxtHelper->DrawTextLine( szBuf );
+
+            for ( uint32_t counter = 0; counter < count; counter++ )
+            {
+                uint32_t enabledCounterIndex;
+                gpa.GetEnabledIndex( counter, &enabledCounterIndex );
+
+                const char* name;
+                gpa.GetCounterName( enabledCounterIndex, &name );
+
+                GPAType type;
+                gpa.GetCounterDataType( enabledCounterIndex, &type );
+
+                if ( type == GPA_TYPE_UINT32 )
+                {
+                    uint32_t value;
+                    gpa.GetSampleUInt32( g_CurrentWaitSessionId, sample, enabledCounterIndex, &value );
+                    swprintf_s( szFormat, 256, L"%u", value );
+                }
+                else if ( type == GPA_TYPE_UINT64 )
+                {
+                    uint64_t value;
+                    gpa.GetSampleUInt64( g_CurrentWaitSessionId, sample, enabledCounterIndex, &value );
+                    swprintf_s( szFormat, 256, L"%I64u", value );
+                }
+                else if ( type == GPA_TYPE_FLOAT32 )
+                {
+                    float value;
+                    gpa.GetSampleFloat32( g_CurrentWaitSessionId, sample, enabledCounterIndex, &value );
+                    swprintf_s( szFormat, 256, L"%f", value );
+                }
+                else if ( type == GPA_TYPE_FLOAT64 )
+                {
+                    double value;
+                    gpa.GetSampleFloat64( g_CurrentWaitSessionId, sample, enabledCounterIndex, &value );
+                    swprintf_s( szFormat, 256, L"%f", value );
+                }
+                
+                swprintf_s( szBuf, 256, L" \\---- %S : %s", name, szFormat );
+                g_pTxtHelper->DrawTextLine( szBuf );
+            }
+            
+        }
+    }
+
     g_pTxtHelper->SetInsertionPos( 5, DXUTGetDXGIBackBufferSurfaceDesc()->Height - AMD::HUD::iElementDelta );
     g_pTxtHelper->DrawTextLine( L"Toggle GUI    : F1" );
 
@@ -659,6 +729,18 @@ HRESULT CALLBACK OnD3D11CreateDevice( ID3D11Device* pd3dDevice, const DXGI_SURFA
 
     // It is important that the extension mechanism is initialized before we create the shaders.
     InitExtensions();
+
+    GPAWrapper& gpa = GPAWrapper::Instance();
+    if ( gpa.IsGPASupported() )
+    {
+        gpa.OpenContext( pd3dDevice );
+
+        gpa.EnableCounterStr( "CSALUStalledByLDS" );
+        gpa.EnableCounterStr( "CSLDSBankConflict" );
+        gpa.EnableCounterStr( "CSLDSInsts" );
+        //gpa.EnableCounterStr( "CSBusy" );
+        //gpa.EnableCounterStr( "CSTime" );
+    }
 
     XMVECTOR SceneMin, SceneMax;
 
@@ -846,6 +928,9 @@ void CALLBACK OnD3D11FrameRender( ID3D11Device* pd3dDevice, ID3D11DeviceContext*
     // Check GUI state for shader extensions
     g_CurrentGuiState.m_bUseShaderExtensions = g_HUD.m_GUI.GetCheckBox( IDC_CHECKBOX_USE_SHADER_EXTENSIONS )->GetChecked() && g_ShaderExtensionsSupported;
 
+    // Check GUI state for GPA profiling
+    g_CurrentGuiState.m_bGPAProfilingEnabled = g_HUD.m_GUI.GetCheckBox( IDC_CHECKBOX_ENABLE_GPA_PROFILING )->GetChecked();
+
     // Check GUI state for light drawing enabled
     g_CurrentGuiState.m_bLightDrawingEnabled = g_HUD.m_GUI.GetCheckBox( IDC_CHECKBOX_ENABLE_LIGHT_DRAWING )->GetEnabled() &&
         g_HUD.m_GUI.GetCheckBox( IDC_CHECKBOX_ENABLE_LIGHT_DRAWING )->GetChecked();
@@ -963,6 +1048,20 @@ void CALLBACK OnD3D11FrameRender( ID3D11Device* pd3dDevice, ID3D11DeviceContext*
     bool bForwardPlus = g_HUD.m_GUI.GetRadioButton( IDC_RADIOBUTTON_FORWARD_PLUS )->GetEnabled() &&
         g_HUD.m_GUI.GetRadioButton( IDC_RADIOBUTTON_FORWARD_PLUS )->GetChecked();
 
+    GPAWrapper& gpa = GPAWrapper::Instance();
+    uint32_t sessionID = 0;
+    if ( g_CurrentGuiState.m_bGPAProfilingEnabled )
+    {
+        GPAHelper::Reset();
+
+        gpa.BeginSession( &sessionID );
+        uint32_t numRequiredPasses;
+        gpa.GetPassCount( &numRequiredPasses );
+        assert( numRequiredPasses == 1 );
+
+        gpa.BeginPass();
+    }
+
     // Render objects here...
     if( g_ShaderCache.ShadersReady() )
     {
@@ -1046,6 +1145,36 @@ void CALLBACK OnD3D11FrameRender( ID3D11Device* pd3dDevice, ID3D11DeviceContext*
         OutputDebugString( L"\n" );
         dwTimefirst = GetTickCount();
     }
+
+    if ( g_CurrentGuiState.m_bGPAProfilingEnabled )
+    {
+        gpa.EndPass();
+        gpa.EndSession();
+
+        bool readyResult = false;
+        if ( sessionID != g_CurrentWaitSessionId )
+        {
+            int sessionStatus = gpa.IsSessionReady( &readyResult, g_CurrentWaitSessionId );
+            while ( sessionStatus == GPA_STATUS_ERROR_SESSION_NOT_FOUND )
+            {
+                // skipping a session which got overwritten
+                g_CurrentWaitSessionId++;
+                sessionStatus = gpa.IsSessionReady( &readyResult, g_CurrentWaitSessionId );
+            }
+        }
+        if ( readyResult )
+        {
+            static uint32_t statsPeriod = g_statsPeriod;
+            if ( g_trackingStats )
+            {
+                std::string filename = "gpacounters" + std::to_string( g_statsPeriod ) + ".csv";
+                WriteSession( g_CurrentWaitSessionId, filename.c_str(), statsPeriod == g_statsPeriod );
+            }
+            statsPeriod = g_statsPeriod;            
+            g_CurrentWaitSessionId++;
+        }        
+    }
+
 }
 
 
@@ -1114,6 +1243,10 @@ void CALLBACK OnD3D11DestroyDevice( void* pUserContext )
 
     // It is safe to call the deinit even if the init was not called.
     agsDriverExtensionsDX11_DeInit(g_AGSContext);
+
+    GPAWrapper& gpa = GPAWrapper::Instance();
+    gpa.CloseContext();
+    gpa.Destroy();    
 }
 
 

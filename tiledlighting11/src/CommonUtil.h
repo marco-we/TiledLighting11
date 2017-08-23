@@ -93,13 +93,14 @@ namespace TiledLighting11
         int m_nLightingMode;
         int m_nDebugDrawType;
         bool m_bUseShaderExtensions;
+        bool m_bGPAProfilingEnabled;
         bool m_bLightDrawingEnabled;
         bool m_bTransparentObjectsEnabled;
         bool m_bShadowsEnabled;
         bool m_bVPLsEnabled;
         int m_nGridObjectTriangleDensity;
         int m_nNumGridObjects;
-        int m_nNumGBufferRenderTargets;
+        int m_nNumGBufferRenderTargets;        
     };
 
     struct DepthStencilBuffer
